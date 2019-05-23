@@ -158,10 +158,6 @@ struct cache_entry *cache_get(struct cache *cache, char *path) {
   struct cache_entry *entry =
       (struct cache_entry *)hashtable_get(cache->index, path);
   if (entry != NULL) {
-    printf("struct cache_entry {\npath: %s \ncontent_type: %s\ncontent_size: "
-           "%d\ncontent: %s\n}\n",
-           entry->path, entry->content_type, entry->content_length,
-           entry->content);
     dllist_move_to_head(cache, entry);
     return entry;
   }
