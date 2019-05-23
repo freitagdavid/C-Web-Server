@@ -49,8 +49,23 @@
  *
  * Return the value from the send() function.
  */
-int send_response(int fd, char *header, char *content_type, void *body,
-                  int content_length) {
+
+struct response {
+  int fd;
+  char *path;
+  char *header;
+  char *content_type;
+  void *body;
+  int content_length;
+};
+
+void destroy_response(struct response *r) { free(r); }
+
+struct response *alloc_response() {
+  return calloc(1, sizeof(struct response));
+}
+
+int send_response(struct response *r) {
   const int max_response_size = 262144;
   char response[max_response_size];
   // Build HTTP response and store it in response
@@ -69,17 +84,19 @@ int send_response(int fd, char *header, char *content_type, void *body,
               "Content-Type: %s\n"
               "Content-Length: %d\n"
               "Date: %s\n",
-              header, content_type, content_length, timestamp);
+              r->header, r->content_type, r->content_length, timestamp);
 
-  memcpy(response + response_length, body, content_length);
-  response_length += content_length;
+  memcpy(response + response_length, r->body, r->content_length);
+  response_length += r->content_length;
 
   // Send it all!
-  int rv = send(fd, response, response_length, 0);
+  int rv = send(r->fd, response, response_length, 0);
 
   if (rv < 0) {
     perror("send");
   }
+
+  destroy_response(r);
 
   return rv;
 }
@@ -89,10 +106,13 @@ int send_response(int fd, char *header, char *content_type, void *body,
  */
 void get_d20(int fd) {
   srand(time(0));
-  char return_number[10];
-  sprintf(return_number, "%d", rand() % 20 + 1);
-  send_response(fd, "HTTP/1.1 200 OK", "text/plain", return_number,
-                strlen(return_number));
+  struct response *response = alloc_response();
+  sprintf(response->body, "%d", rand() % 20 + 1);
+  response->fd = fd;
+  response->header = "HTTP/1.1 200 OK";
+  response->content_type = "text/plain";
+  response->content_length = strlen(response->body);
+  send_response(response);
 }
 
 /**
@@ -113,12 +133,45 @@ void resp_404(int fd) {
     file_free(filedata);
   } else {
     mime_type = mime_type_get(filepath);
+    struct response *response = alloc_response();
+    response->fd = fd;
+    response->header = "HTTP/1.1 404 NOT FOUND";
+    response->content_type = mime_type;
+    response->body = filedata->data;
+    response->content_length = filedata->size;
 
-    send_response(fd, "HTTP/1.1 404 NOT FOUND", mime_type, filedata->data,
-                  filedata->size);
+    send_response(response);
 
     file_free(filedata);
   }
+}
+
+void cache_handler(struct cache *cache, struct response *response) {
+  struct file_data *file_data;
+  struct cache_entry *cache_entry;
+  char filepath[4096];
+  snprintf(filepath, sizeof filepath, "%s%s", SERVER_ROOT, response->path);
+  cache_entry = cache_get(cache, response->path);
+
+  if (cache_entry != NULL) {
+    response->content_type = cache_entry->content_type;
+    response->content_length = cache_entry->content_length;
+    response->body = cache_entry->content;
+    return;
+  }
+
+  file_data = file_load(filepath);
+  if (!file_data) {
+    resp_404(response->fd);
+    return;
+  }
+
+  response->body = file_data->data;
+  response->content_length = file_data->size;
+  response->content_type = mime_type_get(filepath);
+  cache_put(cache, response->path, response->content_type, response->body,
+            response->content_length);
+  file_free(file_data);
 }
 
 /**
@@ -128,24 +181,14 @@ void get_file(int fd, struct cache *cache, char *request_path) {
   ///////////////////
   // IMPLEMENT ME! //
   ///////////////////
-  char filepath[4096];
-  struct file_data *filedata;
-  char *mime_type;
+  struct response *response = alloc_response();
+  response->path = request_path;
+  response->fd = fd;
+  cache_handler(cache, response);
 
-  snprintf(filepath, sizeof filepath, "%s%s", SERVER_ROOT, request_path);
-  filedata = file_load(filepath);
+  response->header = "HTTP/1.1 200 OK";
 
-  if (filedata == NULL) {
-    resp_404(fd);
-    return;
-  }
-
-  mime_type = mime_type_get(filepath);
-
-  send_response(fd, "HTTP/1.1 200 OK", mime_type, filedata->data,
-                filedata->size);
-
-  file_free(filedata);
+  send_response(response);
 }
 
 /**
