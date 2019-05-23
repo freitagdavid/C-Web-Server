@@ -98,7 +98,7 @@ struct cache *cache_create(int max_size, int hashsize) {
   ///////////////////
   // IMPLEMENT ME! //
   ///////////////////
-  struct cache *new_cache = malloc(sizeof(struct cache));
+  struct cache *new_cache = (struct cache *)malloc(sizeof(struct cache));
   new_cache->index = hashtable_create(hashsize, NULL);
   new_cache->max_size = max_size;
   new_cache->cur_size = 0;
@@ -142,8 +142,9 @@ void cache_put(struct cache *cache, char *path, char *content_type,
   dllist_insert_head(cache, new_item);
 
   if (cache->cur_size > cache->max_size) {
+    char *to_delete = cache->tail->path;
     dllist_remove_tail(cache);
-    hashtable_delete(cache->index, path);
+    hashtable_delete(cache->index, to_delete);
   }
 }
 
@@ -154,10 +155,13 @@ struct cache_entry *cache_get(struct cache *cache, char *path) {
   ///////////////////
   // IMPLEMENT ME! //
   ///////////////////
-  struct cache_entry *entry = hashtable_get(cache->index, path);
-  if (entry) {
-    printf("%s \n", entry->path);
-    printf("%s \n", entry->content);
+  struct cache_entry *entry =
+      (struct cache_entry *)hashtable_get(cache->index, path);
+  if (entry != NULL) {
+    printf("struct cache_entry {\npath: %s \ncontent_type: %s\ncontent_size: "
+           "%d\ncontent: %s\n}\n",
+           entry->path, entry->content_type, entry->content_length,
+           entry->content);
     dllist_move_to_head(cache, entry);
     return entry;
   }
